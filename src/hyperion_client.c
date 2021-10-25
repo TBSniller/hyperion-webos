@@ -70,8 +70,11 @@ int hyperion_client(const char *origin, const char *hostname, int port, int prio
 
 int hyperion_read()
 {
-    if (!sockfd)
-        return -1;
+//    fprintf(stderr, "[Hyperion read]!\n");
+    if (!sockfd){
+ //       fprintf(stderr, "[Hyperion read] !sockfd!\n");
+        return 0;
+    }
     uint8_t headbuff[4];
     int n = read(sockfd, headbuff, 4);
     uint32_t messageSize =
@@ -79,19 +82,27 @@ int hyperion_read()
         ((headbuff[1] << 16) & 0x00FF0000) |
         ((headbuff[2] << 8) & 0x0000FF00) |
         ((headbuff[3]) & 0x000000FF);
-    if (n < 0 || messageSize >= sizeof(recvBuff))
+    if (n < 0 || messageSize >= sizeof(recvBuff)){
+ //       fprintf(stderr, "[Hyperion read] n < 0 || messageSize >= sizeof(recvBuff)!\n");
         return -1;
+    }
     n = read(sockfd, recvBuff, messageSize);
-    if (n < 0)
+    if (n < 0){
+ //       fprintf(stderr, "[Hyperion read] n < 0!\n");
         return -1;
+    }
     _parse_reply(hyperionnet_Reply_as_root(recvBuff));
+ //   fprintf(stderr, "[Hyperion read] return 0!\n");
     return 0;
 }
 
 int hyperion_destroy()
 {
-    if (!sockfd)
+//    fprintf(stderr, "[Hyperion destroy]!\n");
+    if (!sockfd){
+ //       fprintf(stderr, "[Hyperion destroy] !sockfd!\n");
         return 0;
+    }
     close(sockfd);
     sockfd = 0;
     return 0;
@@ -115,8 +126,10 @@ int hyperion_set_image(const unsigned char *image, int width, int height)
 
 int hyperion_set_register(const char *origin, int priority)
 {
-    if (!sockfd)
+    if (!sockfd){
+ //       fprintf(stderr, "[Set register] !sockfd!\n");
         return 0;
+    }
     flatbuffers_builder_t B;
     flatcc_builder_init(&B);
     hyperionnet_Register_ref_t registerReq = hyperionnet_Register_create(&B, flatcc_builder_create_string_str(&B, origin), priority);
@@ -131,12 +144,17 @@ int hyperion_set_register(const char *origin, int priority)
         (uint8_t)(size & 0xFF),
     };
 
+ //   fprintf(stderr, "[Set register] Write message!\n");
     // write message
     int ret = 0;
-    if (write(sockfd, header, 4) < 0)
+    if (write(sockfd, header, 4) < 0){
         ret = -1;
-    if (write(sockfd, buf, size) < 0)
+ //       fprintf(stderr, "[Set register] write(sockfd, header, 4) < 0)!\n");
+    }
+    if (write(sockfd, buf, size) < 0){
         ret = -1;
+ //       fprintf(stderr, "[Set register] write(sockfd, buf, size) < 0!\n");
+    }
 
     free(buf);
     flatcc_builder_clear(&B);
@@ -145,13 +163,19 @@ int hyperion_set_register(const char *origin, int priority)
 
 int _send_message(const void *buffer, size_t size)
 {
-    if (!sockfd)
+//    fprintf(stderr, "[Send MSG]\n");
+    if (!sockfd){
+ //       fprintf(stderr, "[Send MSG] !sockfd!\n");
         return 0;
-    if (!_connected)
+    }
+    if (!_connected){
+ //       fprintf(stderr, "[Send MSG] not connected!\n");
         return 0;
+    }
 
     if (!_registered)
     {
+//        fprintf(stderr, "[Send MSG] not registerd!\n");
         return hyperion_set_register(_origin, _priority);
     }
 
@@ -161,19 +185,26 @@ int _send_message(const void *buffer, size_t size)
         (uint8_t)((size >> 8) & 0xFF),
         (uint8_t)(size & 0xFF)};
 
+ //   fprintf(stderr, "[Send MSG] Write message!\n");
     // write message
     int ret = 0;
-    if (write(sockfd, header, 4) < 0)
+    if (write(sockfd, header, 4) < 0){
         ret = -1;
-    if (write(sockfd, buffer, size) < 0)
+ //       fprintf(stderr, "[Send MSG] write(sockfd, header, 4) < 0)!\n");
+    }
+    if (write(sockfd, buffer, size) < 0){
         ret = -1;
+ //       fprintf(stderr, "[Send MSG] write(sockfd, buffer, size) < 0!\n");
+    }
     return ret;
 }
 
 bool _parse_reply(hyperionnet_Reply_table_t reply)
 {
+//    fprintf(stderr, "[Parse reply]\n");
     if (!hyperionnet_Reply_error(reply))
     {
+ //       fprintf(stderr, "[Parse reply] Got message!\n");
         // no error set must be a success or registered or video
         int32_t videoMode = hyperionnet_Reply_video(reply);
         int32_t registered = hyperionnet_Reply_registered(reply);
@@ -187,19 +218,21 @@ bool _parse_reply(hyperionnet_Reply_table_t reply)
         // We got a registered reply.
         if (registered == -1 || registered != _priority)
         {
+ //           fprintf(stderr, "[Parse reply] registered false!\n");
             _registered = false;
         }
         else
         {
+//            fprintf(stderr, "[Parse reply] registered true!\n");
             _registered = true;
         }
-
+ //       fprintf(stderr, "[Parse reply] reply no error!\n");
         return true;
     }
     else
     {
         flatbuffers_string_t error = hyperionnet_Reply_error(reply);
-        fprintf(stderr, "Error from server: %s\n", error);
+        fprintf(stderr, "[Parse reply] Error from server: %s\n", error);
     }
 
     return false;

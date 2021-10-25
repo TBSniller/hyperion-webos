@@ -24,6 +24,8 @@ static struct option long_options[] = {
     {"address", required_argument, 0, 'a'},
     {"port", optional_argument, 0, 'p'},
     {"fps", optional_argument, 0, 'f'},
+    {"no-video", optional_argument, 0, 'V'},
+    {"no-gui", optional_argument, 0, 'G'},
     {0, 0, 0, 0},
 };
 
@@ -38,7 +40,7 @@ HAL_GAL_DRAW_SETTINGS settings;
 uint32_t color = 0;
 
 //Other
-const VT_CALLER_T caller[24] = "com.webos.tbtest.cap";
+const VT_CALLER_T caller[24] = "org.webosbrew.piccap.cap";
 
 VT_DRIVER *driver;
 VT_CLIENTID_T client[128] = "00";
@@ -63,7 +65,7 @@ int comsize;
 char *combined;
 int rgbasize;
 int rgbsize;   
-char *rgbout;   
+char *rgbaout;   
 char *rgb;
 char *hal;
 
@@ -86,7 +88,7 @@ int fd;
 
 VT_RESOLUTION_T resolution = {360, 180};
 static const char *_address = NULL;
-static int _port = 19400, _fps = 15, _framedelay_us = 0;
+static int _port = 19400, _fps = 15, _framedelay_us = 0, _novideo = 0, _nogui = 0;
 
 int capture_initialize();
 void capture_terminate();
@@ -98,6 +100,7 @@ void send_picture();
 int blend(unsigned char *result, unsigned char *fg, unsigned char *bg, int leng);
 int remalpha(unsigned char *result, unsigned char *rgba, int leng);
 void NV21_TO_RGBA(unsigned char *yuyv, unsigned char *rgba, int width, int height);
+void NV21_TO_RGB24(unsigned char *yuyv, unsigned char *rgb, int width, int height);
 
 static void handle_signal(int signal)
 {
@@ -120,17 +123,19 @@ static void print_usage()
     printf("\n");
     printf("Grab screen content continously and send to Hyperion via flatbuffers server.\n");
     printf("\n");
-    printf("  -x, --width           Width of video frame (default 192)\n");
-    printf("  -y, --height          Height of video frame (default 108)\n");
+    printf("  -x, --width           Width of video frame (default 360)\n");
+    printf("  -y, --height          Height of video frame (default 180)\n");
     printf("  -a, --address         IP address of Hyperion server\n");
     printf("  -p, --port            Port of Hyperion flatbuffers server (default 19400)\n");
-    printf("  -f, --fps             Framerate for sending video frames (default 15)\n");
+    printf("  -f, --fps             Framerate for sending video frames (default unlimited)\n");
+    printf("  -V, --no-video        Video will not be captured\n");
+    printf("  -G, --no-gui          GUI/UI will not be captured\n");
 }
 
 static int parse_options(int argc, char *argv[])
 {
     int opt, longindex;
-    while ((opt = getopt_long(argc, argv, "x:y:a:p:f:", long_options, &longindex)) != -1)
+    while ((opt = getopt_long(argc, argv, "x:y:a:p:f:VG", long_options, &longindex)) != -1)
     {
         switch (opt)
         {
@@ -149,11 +154,23 @@ static int parse_options(int argc, char *argv[])
         case 'f':
             _fps = atoi(optarg);
             break;
+        case 'V':
+            _novideo = 1;
+            break;
+        case 'G':
+            _nogui = 1;
+            break;
         }
     }
     if (!_address)
     {
         fprintf(stderr, "Error! Address not specified.\n");
+        print_usage();
+        return 1;
+    }
+
+    if (_novideo == 1 && _nogui == 1){
+        fprintf(stderr, "Error! Disabling both video and gui is stupid, what do you want to do?\n");
         print_usage();
         return 1;
     }
@@ -221,12 +238,14 @@ int main(int argc, char *argv[])
     printf("Start connection loop\n");
     while (!app_quit)
     {
+//        printf("-- Loop begin --\n");
         capture_frame();
         if (hyperion_read() < 0)
         {
             fprintf(stderr, "Connection terminated.\n");
             app_quit = true;
         }
+//        printf("-- Loop end --\n");
     }
     ret = 0;
 cleanup:
@@ -241,113 +260,146 @@ cleanup:
 
 int capture_initialize()
 {
-    fprintf(stderr, "Init graphical capture..\n");
+    if(_nogui != 1){
+        fprintf(stderr, "Init graphical capture..\n");
 
-    if ((done = HAL_GAL_Init()) != 0) {
-        fprintf(stderr, "HAL_GAL_Init failed: %x\n", done);
-        return -1;
-    }
-    fprintf(stderr, "HAL_GAL_Init done! Exit: %d\n", done);   
+        if ((done = HAL_GAL_Init()) != 0) {
+            fprintf(stderr, "HAL_GAL_Init failed: %x\n", done);
+            return -1;
+        }
+        fprintf(stderr, "HAL_GAL_Init done! Exit: %d\n", done);   
 
-    if ((done = HAL_GAL_CreateSurface(resolution.w, resolution.h, 0, &surfaceInfo)) != 0) {
-        fprintf(stderr, "HAL_GAL_CreateSurface failed: %x\n", done);
-        return -1;
-    }
-    fprintf(stderr, "HAL_GAL_CreateSurface done! SurfaceID: %d\n", surfaceInfo.vendorData);
+        if ((done = HAL_GAL_CreateSurface(resolution.w, resolution.h, 0, &surfaceInfo)) != 0) {
+            fprintf(stderr, "HAL_GAL_CreateSurface failed: %x\n", done);
+            return -1;
+        }
+        fprintf(stderr, "HAL_GAL_CreateSurface done! SurfaceID: %d\n", surfaceInfo.vendorData);
 
-    isrunning = 1;
-
-    if ((done = HAL_GAL_CaptureFrameBuffer(&surfaceInfo)) != 0) {
-        fprintf(stderr, "HAL_GAL_CaptureFrameBuffer failed: %x\n", done);
-        return -1;
-    }
-    fprintf(stderr, "HAL_GAL_CaptureFrameBuffer done! %x\n", done);
-
-    fd = open("/dev/gfx",2);
-    if (fd < 0){
-        fprintf(stderr, "HAL_GAL: gfx open fail result: %d\n", fd);
-        return -1;
-
-    }else{
-        fprintf(stderr, "HAL_GAL: gfx open ok result: %d\n", fd);
-    }
-
-    len = surfaceInfo.property;
-    if (len == 0){
-        len = surfaceInfo.height * surfaceInfo.pitch;
-    }
-
-    fprintf(stderr, "Halgal done!\nInit video capture..\n");
-    driver = vtCapture_create();
-    fprintf(stderr, "Driver created!\n");
-
-    done = vtCapture_init(driver, caller, client);
-    if (done != 0) {
-        fprintf(stderr, "vtCapture_init failed: %x\nQuitting...\n", done);
-        return -1;
-    }
-    fprintf(stderr, "vtCapture_init done!\nCaller_ID: %s Client ID: %s \n", caller, client);
-
-    done = vtCapture_preprocess(driver, client, &props);
-    if (done != 0) {
-        fprintf(stderr, "vtCapture_preprocess failed: %x\nQuitting...\n", done);
-        return -1;
-    }
-    fprintf(stderr, "vtCapture_preprocess done!\n");
-
-    done = vtCapture_planeInfo(driver, client, &plane);
-    if (done == 0 ) {
-        stride = plane.stride;
-
-        region = plane.planeregion;
-        x = region.a, y = region.b, w = region.c, h = region.d;
-
-        activeregion = plane.activeregion;
-        xa = activeregion.a, ya = activeregion.b, wa = activeregion.c, ha = activeregion.d;
-    }else{
-        fprintf(stderr, "vtCapture_planeInfo failed: %x\nQuitting...\n", done);
-        return -1;
-    }
-    fprintf(stderr, "vtCapture_planeInfo done!\nstride: %d\nRegion: x: %d, y: %d, w: %d, h: %d\nActive Region: x: %d, y: %d w: %d h: %d\n", stride, x, y, w, h, xa, ya, wa, ha);
-
-    done = vtCapture_process(driver, client);
-    if (done == 0){
         isrunning = 1;
-        capture_initialized = true;
-    }else{
-        isrunning = 0;
-        fprintf(stderr, "vtCapture_process failed: %x\nQuitting...\n", done);
-        return -1;
+
+        if ((done = HAL_GAL_CaptureFrameBuffer(&surfaceInfo)) != 0) {
+            fprintf(stderr, "HAL_GAL_CaptureFrameBuffer failed: %x\n", done);
+            return -1;
+        }
+        fprintf(stderr, "HAL_GAL_CaptureFrameBuffer done! %x\n", done);
+
+        fd = open("/dev/gfx",2);
+        if (fd < 0){
+            fprintf(stderr, "HAL_GAL: gfx open fail result: %d\n", fd);
+            return -1;
+
+        }else{
+            fprintf(stderr, "HAL_GAL: gfx open ok result: %d\n", fd);
+        }
+
+        len = surfaceInfo.property;
+        if (len == 0){
+            len = surfaceInfo.height * surfaceInfo.pitch;
+        }
+
+        fprintf(stderr, "Halgal done!\n");
     }
-    fprintf(stderr, "vtCapture_process done!\n");
 
-    sleep(2);
+    if(_novideo != 1){
+        fprintf(stderr, "Init video capture..\n");
+        driver = vtCapture_create();
+        fprintf(stderr, "Driver created!\n");
 
-    done = vtCapture_currentCaptureBuffInfo(driver, &buff);
-    if (done == 0 ) {
-        addr0 = buff.start_addr0;
-        addr1 = buff.start_addr1;
-        size0 = buff.size0;
-        size1 = buff.size1;
-    }else{
-        fprintf(stderr, "vtCapture_currentCaptureBuffInfo failed: %x\nQuitting...\n", done);
-        capture_stop();
-        return -1;
+        done = vtCapture_init(driver, caller, client);
+        if (done != 0) {
+            fprintf(stderr, "vtCapture_init failed: %x\nQuitting...\n", done);
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_init done!\nCaller_ID: %s Client ID: %s \n", caller, client);
+
+        done = vtCapture_preprocess(driver, client, &props);
+        if (done != 0) {
+            fprintf(stderr, "vtCapture_preprocess failed: %x\nQuitting...\n", done);
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_preprocess done!\n");
+
+        done = vtCapture_planeInfo(driver, client, &plane);
+        if (done == 0 ) {
+            stride = plane.stride;
+
+            region = plane.planeregion;
+            x = region.a, y = region.b, w = region.c, h = region.d;
+
+            activeregion = plane.activeregion;
+            xa = activeregion.a, ya = activeregion.b, wa = activeregion.c, ha = activeregion.d;
+        }else{
+            fprintf(stderr, "vtCapture_planeInfo failed: %x\nQuitting...\n", done);
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_planeInfo done!\nstride: %d\nRegion: x: %d, y: %d, w: %d, h: %d\nActive Region: x: %d, y: %d w: %d h: %d\n", stride, x, y, w, h, xa, ya, wa, ha);
+
+        done = vtCapture_process(driver, client);
+        if (done == 0){
+            isrunning = 1;
+            capture_initialized = true;
+        }else{
+            isrunning = 0;
+            fprintf(stderr, "vtCapture_process failed: %x\nQuitting...\n", done);
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_process done!\n");
+
+        sleep(2);
+
+        done = vtCapture_currentCaptureBuffInfo(driver, &buff);
+        if (done == 0 ) {
+            addr0 = buff.start_addr0;
+            addr1 = buff.start_addr1;
+            size0 = buff.size0;
+            size1 = buff.size1;
+        }else{
+            fprintf(stderr, "vtCapture_currentCaptureBuffInfo failed: %x\nQuitting...\n", done);
+            capture_stop();
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_currentCaptureBuffInfo done!\naddr0: %p addr1: %p size0: %d size1: %d\n", addr0, addr1, size0, size1);
+
     }
-    fprintf(stderr, "vtCapture_currentCaptureBuffInfo done!\naddr0: %p addr1: %p size0: %d size1: %d\n", addr0, addr1, size0, size1);
 
-    comsize = size0+size1; 
-    combined = (char *) malloc(comsize);
+    if(_novideo != 1 && _nogui != 1) //Both
+    {
+        comsize = size0+size1; 
+        combined = (char *) malloc(comsize);
 
-    rgbasize = sizeof(combined)*stride*h*4;
-    rgbsize = sizeof(combined)*stride*h*3;   
-    rgbout = (char *) malloc(rgbasize);   
-    gesamt = (char *) malloc(len);
-    hal = (char *) malloc(len);
-    rgb = (char *) malloc(len);
+        rgbasize = sizeof(combined)*stride*h*4;
+        rgbsize = sizeof(combined)*stride*h*3;   
+        rgbaout = (char *) malloc(rgbasize); 
 
-    addr = (char *) mmap(0, len, 3, 1, fd, surfaceInfo.offset);
 
+        rgb = (char *) malloc(rgbsize);
+        gesamt = (char *) malloc(len);
+        hal = (char *) malloc(len);
+
+        addr = (char *) mmap(0, len, 3, 1, fd, surfaceInfo.offset);
+    }
+    else if (_novideo != 1 && _nogui == 1) //Video only
+    {
+        comsize = size0+size1; 
+        combined = (char *) malloc(comsize);
+
+        rgbasize = sizeof(combined)*stride*h*4;
+        rgbsize = sizeof(combined)*stride*h*3;   
+        rgb = (char *) malloc(rgbsize);
+        rgbaout = (char *) malloc(rgbasize);
+    }
+    else if (_nogui != 1 && _novideo == 1) //GUI only
+    {
+        stride = surfaceInfo.pitch/4;
+
+        rgbsize = sizeof(combined)*stride*h*3;
+        gesamt = (char *) malloc(len);
+        rgb = (char *) malloc(len);
+        hal = (char *) malloc(len);
+        addr = (char *) mmap(0, len, 3, 1, fd, surfaceInfo.offset);
+    }
+
+    capture_initialized = true;
     return 0;
 }
 
@@ -357,21 +409,29 @@ void capture_stop()
 
     int done;
     if(isrunning == 1){
-        munmap(addr, len);
-        free(combined);
-        free(rgbout);
-        free(gesamt);
-        free(rgb);
-        done = close(fd);
-        if (done != 0){
-            fprintf(stderr, "gfx close fail result: %d\n", done);
-        }else{
-            fprintf(stderr, "gfx close ok result: %d\n", done);
+        if(_novideo != 1){ 
+            free(combined);
         }
+        if(_nogui != 1){
+            munmap(addr, len);
+            done = close(fd);
+            if (done != 0){
+                fprintf(stderr, "gfx close fail result: %d\n", done);
+            }else{
+                fprintf(stderr, "gfx close ok result: %d\n", done);
+            }
+        }
+        free(rgbaout);
+        free(rgb);
+        free(gesamt);
     }
     done = 0;
-    done = capture_stop_vt();
-    done += capture_stop_hal();
+    if(_novideo != 1){
+        done += capture_stop_vt();
+    }
+    if(_nogui != 1){
+        done += capture_stop_hal();
+    }
     return;
 }
 
@@ -439,35 +499,43 @@ void capture_frame()
 {
     do{
         if (!capture_initialized){
+            fprintf(stderr, "No initialized!\n");
             return;
         }
         pthread_mutex_lock(&frame_mutex);
         static uint32_t framecount = 0;
         static uint64_t last_ticks = 0, fps_ticks = 0;
         uint64_t ticks = getticks_us();
-        if (ticks - last_ticks < _framedelay_us)
-        {
-            pthread_mutex_unlock(&frame_mutex);
-            return;
-        }
         last_ticks = ticks;
 
-        //Videobuffer needs to combined
-        memcpy(combined, addr0, size0);
-        memcpy(combined+size0, addr1, size1);
-
-        NV21_TO_RGBA(combined, rgbout, stride, h);
-
-
-        if ((done = HAL_GAL_CaptureFrameBuffer(&surfaceInfo)) != 0) {
-            fprintf(stderr, "HAL_GAL_CaptureFrameBuffer failed: %x\n", done);
-            capture_stop();
-            return;
+        if(_novideo != 1){
+            memcpy(combined, addr0, size0);
+            memcpy(combined+size0, addr1, size1);
         }
-        memcpy(hal,addr,len);
 
-        blend(gesamt, hal, rgbout, len);
-        remalpha(rgb, gesamt, len);
+        if(_nogui != 1){
+            if ((done = HAL_GAL_CaptureFrameBuffer(&surfaceInfo)) != 0) {
+                fprintf(stderr, "HAL_GAL_CaptureFrameBuffer failed: %x\n", done);
+                capture_stop();
+                return;
+            }
+            memcpy(hal,addr,len);
+        }
+
+        if(_novideo != 1 && _nogui != 1) //Both
+        {
+            NV21_TO_RGBA(combined, rgbaout, stride, h);
+            blend(gesamt, hal, rgbaout, len);
+            remalpha(rgb, gesamt, len);
+        }
+        else if (_novideo != 1 && _nogui == 1) //Video only
+        {
+            NV21_TO_RGB24(combined, rgb, stride, h);
+        }
+        else if (_nogui != 1 && _novideo == 1) //GUI only
+        {
+            remalpha(rgb, hal, len);
+        }
 
         send_picture();
  
@@ -478,8 +546,8 @@ void capture_frame()
         }
         else if (ticks - fps_ticks >= 1000000)
         {
-            printf("[Stat] Send framerate: %d\n",
-                framecount);
+//            printf("[Stat] Send framerate: %d\n",
+//                framecount);
             framecount = 0;
             fps_ticks = ticks;
         }
@@ -491,6 +559,7 @@ void send_picture()
 {
     int width = resolution.w, height = resolution.h;
 
+//    fprintf(stderr, "[Client] hyperion_set_image\n");
     if (hyperion_set_image(rgb, stride, resolution.h) != 0)
     {
         fprintf(stderr, "Write timeout\n");
@@ -571,6 +640,46 @@ void NV21_TO_RGBA(unsigned char *yuyv, unsigned char *rgba, int width, int heigh
                 rgba[i * width * 4 + 4 * j + 1] = g;
                 rgba[i * width * 4 + 4 * j + 2] = r;   
                 rgba[i * width * 4 + 4 * j + 3] = a;               
+                rgb_index++;
+
+            }
+        }
+}
+
+//Credits: https://www.programmersought.com/article/18954751423/
+void NV21_TO_RGB24(unsigned char *yuyv, unsigned char *rgb, int width, int height)
+{
+        const int nv_start = width * height ;
+        int  index = 0, rgb_index = 0;
+        uint8_t y, u, v;
+        int r, g, b, nv_index = 0,i, j;
+ 
+        for(i = 0; i < height; i++){
+            for(j = 0; j < width; j ++){
+
+                nv_index = i / 2  * width + j - j % 2;
+ 
+                y = yuyv[rgb_index];
+                u = yuyv[nv_start + nv_index ];
+                v = yuyv[nv_start + nv_index + 1];
+ 
+                r = y + (140 * (v-128))/100;  //r
+                g = y - (34 * (u-128))/100 - (71 * (v-128))/100; //g
+                b = y + (177 * (u-128))/100; //b
+ 
+                if(r > 255)   r = 255;
+                if(g > 255)   g = 255;
+                if(b > 255)   b = 255;
+                if(r < 0)     r = 0;
+                if(g < 0)     g = 0;
+                if(b < 0)     b = 0;
+ 
+                index = rgb_index % width + (height - i - 1) * width;
+
+                rgb[i * width * 3 + 3 * j + 0] = r;
+                rgb[i * width * 3 + 3 * j + 1] = g;
+                rgb[i * width * 3 + 3 * j + 2] = b;
+
                 rgb_index++;
 
             }

@@ -27,7 +27,7 @@ static struct option long_options[] = {
 
 pthread_mutex_t frame_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-const VT_CALLER_T caller[24] = "com.webos.tbtest.cap";
+const VT_CALLER_T caller[24] = "org.webosbrew.piccap.capture";
 
 VT_DRIVER *driver;
 VT_CLIENTID_T client[128] = "00";
