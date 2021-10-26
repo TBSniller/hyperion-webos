@@ -47,13 +47,17 @@ VT_CLIENTID_T client[128] = "00";
 
 bool app_quit = false;
 bool capture_initialized = false;
+bool vtcapture_initialized = false;
+bool restart = false;
+int vtfrmcnt = 0;
 int isrunning = 0;
 int done = 0;
+
 
 _LibVtCaptureProperties props;
 
 _LibVtCapturePlaneInfo plane;
-int stride, x, y, w, h, xa, ya, wa, ha;
+int stride, stride2, x, y, w, h, xa, ya, wa, ha;
 VT_REGION_T region;
 VT_REGION_T activeregion;
 
@@ -67,6 +71,7 @@ int rgbasize;
 int rgbsize;   
 char *rgbaout;   
 char *rgb;
+char *rgb2;
 char *hal;
 
 //All
@@ -91,6 +96,7 @@ static const char *_address = NULL;
 static int _port = 19400, _fps = 15, _framedelay_us = 0, _novideo = 0, _nogui = 0;
 
 int capture_initialize();
+int vtcapture_initialize();
 void capture_terminate();
 void capture_stop();
 int capture_stop_vt();
@@ -227,34 +233,38 @@ int main(int argc, char *argv[])
     rect.h = resolution.h;
 
     flags.pflag = 0;
-
-    if ((ret = capture_initialize()) != 0)
-    {
-        goto cleanup;
-    }
-    
-    hyperion_client("hyperion-webos", _address, _port, 150);
-    signal(SIGINT, handle_signal);
-    printf("Start connection loop\n");
-    while (!app_quit)
-    {
-//        printf("-- Loop begin --\n");
-        capture_frame();
-        if (hyperion_read() < 0)
+    do{
+        restart = false;
+        app_quit = false;
+        if ((ret = capture_initialize()) != 0)
         {
-            fprintf(stderr, "Connection terminated.\n");
-            app_quit = true;
+            goto cleanup;
         }
-//        printf("-- Loop end --\n");
-    }
-    ret = 0;
-cleanup:
-    hyperion_destroy();
-    if (isrunning == 0){
-        capture_terminate();
-    }else{
-        capture_stop();
-    }
+        
+        hyperion_client("hyperion-webos", _address, _port, 150);
+        signal(SIGINT, handle_signal);
+        printf("Start connection loop\n");
+        while (!app_quit)
+        {
+    //        printf("-- Loop begin --\n");
+            capture_frame();
+            if (hyperion_read() < 0)
+            {
+                fprintf(stderr, "Connection terminated.\n");
+                app_quit = true;
+            }
+    //        printf("-- Loop end --\n");
+        }
+        ret = 0;
+    cleanup:
+        hyperion_destroy();
+        if (isrunning == 0){
+            capture_terminate();
+        }else{
+            capture_stop();
+        }
+        sleep(1/1000*500);
+    }while(restart);
     return ret;
 }
 
@@ -305,61 +315,14 @@ int capture_initialize()
         driver = vtCapture_create();
         fprintf(stderr, "Driver created!\n");
 
-        done = vtCapture_init(driver, caller, client);
-        if (done != 0) {
-            fprintf(stderr, "vtCapture_init failed: %x\nQuitting...\n", done);
+        done = vtcapture_initialize();
+        if (done == -1){
             return -1;
+        }else if (done == 17){
+            vtcapture_initialized = false;
+        }else if (done == 0){
+            vtcapture_initialized = true;
         }
-        fprintf(stderr, "vtCapture_init done!\nCaller_ID: %s Client ID: %s \n", caller, client);
-
-        done = vtCapture_preprocess(driver, client, &props);
-        if (done != 0) {
-            fprintf(stderr, "vtCapture_preprocess failed: %x\nQuitting...\n", done);
-            return -1;
-        }
-        fprintf(stderr, "vtCapture_preprocess done!\n");
-
-        done = vtCapture_planeInfo(driver, client, &plane);
-        if (done == 0 ) {
-            stride = plane.stride;
-
-            region = plane.planeregion;
-            x = region.a, y = region.b, w = region.c, h = region.d;
-
-            activeregion = plane.activeregion;
-            xa = activeregion.a, ya = activeregion.b, wa = activeregion.c, ha = activeregion.d;
-        }else{
-            fprintf(stderr, "vtCapture_planeInfo failed: %x\nQuitting...\n", done);
-            return -1;
-        }
-        fprintf(stderr, "vtCapture_planeInfo done!\nstride: %d\nRegion: x: %d, y: %d, w: %d, h: %d\nActive Region: x: %d, y: %d w: %d h: %d\n", stride, x, y, w, h, xa, ya, wa, ha);
-
-        done = vtCapture_process(driver, client);
-        if (done == 0){
-            isrunning = 1;
-            capture_initialized = true;
-        }else{
-            isrunning = 0;
-            fprintf(stderr, "vtCapture_process failed: %x\nQuitting...\n", done);
-            return -1;
-        }
-        fprintf(stderr, "vtCapture_process done!\n");
-
-        sleep(2);
-
-        done = vtCapture_currentCaptureBuffInfo(driver, &buff);
-        if (done == 0 ) {
-            addr0 = buff.start_addr0;
-            addr1 = buff.start_addr1;
-            size0 = buff.size0;
-            size1 = buff.size1;
-        }else{
-            fprintf(stderr, "vtCapture_currentCaptureBuffInfo failed: %x\nQuitting...\n", done);
-            capture_stop();
-            return -1;
-        }
-        fprintf(stderr, "vtCapture_currentCaptureBuffInfo done!\naddr0: %p addr1: %p size0: %d size1: %d\n", addr0, addr1, size0, size1);
-
     }
 
     if(_novideo != 1 && _nogui != 1) //Both
@@ -373,8 +336,11 @@ int capture_initialize()
 
 
         rgb = (char *) malloc(rgbsize);
+        rgb2 = (char *) malloc(len);
         gesamt = (char *) malloc(len);
         hal = (char *) malloc(len);
+
+        stride2 = surfaceInfo.pitch/4;
 
         addr = (char *) mmap(0, len, 3, 1, fd, surfaceInfo.offset);
     }
@@ -403,6 +369,72 @@ int capture_initialize()
     return 0;
 }
 
+int vtcapture_initialize(){
+    int innerdone = 0;
+    innerdone = vtCapture_init(driver, caller, client);
+        if (innerdone == 17) {
+            fprintf(stderr, "vtCapture_init not ready yet return: %d\n", innerdone);
+            return 17;
+        }else if (innerdone !=0){
+            fprintf(stderr, "vtCapture_init failed: %d\nQuitting...\n", innerdone);
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_init done!\nCaller_ID: %s Client ID: %s \n", caller, client);
+
+        innerdone = vtCapture_preprocess(driver, client, &props);
+        if (innerdone != 0) {
+            fprintf(stderr, "vtCapture_preprocess failed: %x\nQuitting...\n", innerdone);
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_preprocess done!\n");
+
+        innerdone = vtCapture_planeInfo(driver, client, &plane);
+        if (innerdone == 0 ) {
+            stride = plane.stride;
+
+            region = plane.planeregion;
+            x = region.a, y = region.b, w = region.c, h = region.d;
+
+            activeregion = plane.activeregion;
+            xa = activeregion.a, ya = activeregion.b, wa = activeregion.c, ha = activeregion.d;
+        }else{
+            fprintf(stderr, "vtCapture_planeInfo failed: %x\nQuitting...\n", innerdone);
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_planeInfo done!\nstride: %d\nRegion: x: %d, y: %d, w: %d, h: %d\nActive Region: x: %d, y: %d w: %d h: %d\n", stride, x, y, w, h, xa, ya, wa, ha);
+
+        innerdone = vtCapture_process(driver, client);
+        if (innerdone == 0){
+            isrunning = 1;
+            capture_initialized = true;
+        }else{
+            isrunning = 0;
+            fprintf(stderr, "vtCapture_process failed: %x\nQuitting...\n", innerdone);
+            return -1;
+        }
+        fprintf(stderr, "vtCapture_process done!\n");
+
+        int cnter = 0;
+        do{
+            sleep(1/1000*100);
+            innerdone = vtCapture_currentCaptureBuffInfo(driver, &buff);
+            if (innerdone == 0 ) {
+                addr0 = buff.start_addr0;
+                addr1 = buff.start_addr1;
+                size0 = buff.size0;
+                size1 = buff.size1;
+            }else if (innerdone != 2){
+                fprintf(stderr, "vtCapture_currentCaptureBuffInfo failed: %x\nQuitting...\n", innerdone);
+                capture_stop();
+                return -1;
+            }
+            cnter++;
+        }while(innerdone != 0);
+        fprintf(stderr, "vtCapture_currentCaptureBuffInfo done after %d tries!\naddr0: %p addr1: %p size0: %d size1: %d\n", cnter, addr0, addr1, size0, size1);
+
+        return 0;
+}
+
 void capture_stop()
 {
     fprintf(stderr, "-- Quit called! --\n");
@@ -420,6 +452,9 @@ void capture_stop()
             }else{
                 fprintf(stderr, "gfx close ok result: %d\n", done);
             }
+        }
+        if(_nogui != 1 && _novideo != 1){
+            free(rgb2);
         }
         free(rgbaout);
         free(rgb);
@@ -497,74 +532,92 @@ uint64_t getticks_us()
 
 void capture_frame()
 {
-    do{
-        if (!capture_initialized){
-            fprintf(stderr, "No initialized!\n");
+    int indone = 0;
+    if (!capture_initialized){
+        fprintf(stderr, "Not initialized!\n");
+        return;
+    }
+    pthread_mutex_lock(&frame_mutex);
+    static uint32_t framecount = 0;
+    static uint64_t last_ticks = 0, fps_ticks = 0;
+    uint64_t ticks = getticks_us();
+    last_ticks = ticks;
+
+    if(_novideo != 1 && vtcapture_initialized){
+        memcpy(combined, addr0, size0);
+        memcpy(combined+size0, addr1, size1);
+    }
+
+    if(_nogui != 1){
+        if ((indone = HAL_GAL_CaptureFrameBuffer(&surfaceInfo)) != 0) {
+            fprintf(stderr, "HAL_GAL_CaptureFrameBuffer failed: %x\n", indone);
+            capture_stop();
             return;
         }
-        pthread_mutex_lock(&frame_mutex);
-        static uint32_t framecount = 0;
-        static uint64_t last_ticks = 0, fps_ticks = 0;
-        uint64_t ticks = getticks_us();
-        last_ticks = ticks;
+        memcpy(hal,addr,len);
+    }
+    if(_novideo != 1 && _nogui != 1 && vtcapture_initialized) //Both
+    {
+        NV21_TO_RGBA(combined, rgbaout, stride, h);
+        blend(gesamt, hal, rgbaout, len);
+        remalpha(rgb, gesamt, len);
+    }
+    else if(_novideo != 1 && _nogui != 1 && !vtcapture_initialized){ //Both, but vt not ready
+        remalpha(rgb2, hal, len);
+    }
+    else if (_novideo != 1 && _nogui == 1 && vtcapture_initialized) //Video only
+    {
+        NV21_TO_RGB24(combined, rgb, stride, h);
+    }
+    else if (_nogui != 1 && _novideo == 1) //GUI only
+    {
+        remalpha(rgb, hal, len);
+    }
+    send_picture();
 
-        if(_novideo != 1){
-            memcpy(combined, addr0, size0);
-            memcpy(combined+size0, addr1, size1);
-        }
-
-        if(_nogui != 1){
-            if ((done = HAL_GAL_CaptureFrameBuffer(&surfaceInfo)) != 0) {
-                fprintf(stderr, "HAL_GAL_CaptureFrameBuffer failed: %x\n", done);
-                capture_stop();
-                return;
-            }
-            memcpy(hal,addr,len);
-        }
-
-        if(_novideo != 1 && _nogui != 1) //Both
-        {
-            NV21_TO_RGBA(combined, rgbaout, stride, h);
-            blend(gesamt, hal, rgbaout, len);
-            remalpha(rgb, gesamt, len);
-        }
-        else if (_novideo != 1 && _nogui == 1) //Video only
-        {
-            NV21_TO_RGB24(combined, rgb, stride, h);
-        }
-        else if (_nogui != 1 && _novideo == 1) //GUI only
-        {
-            remalpha(rgb, hal, len);
-        }
-
-        send_picture();
- 
-        framecount++;
-        if (fps_ticks == 0)
-        {
-            fps_ticks = ticks;
-        }
-        else if (ticks - fps_ticks >= 1000000)
-        {
+    framecount++;
+    if (fps_ticks == 0)
+    {
+        fps_ticks = ticks;
+    }
+    else if (ticks - fps_ticks >= 1000000)
+    {
 //            printf("[Stat] Send framerate: %d\n",
 //                framecount);
-            framecount = 0;
-            fps_ticks = ticks;
-        }
-        pthread_mutex_unlock(&frame_mutex);
-    }while(app_quit);
+        framecount = 0;
+        fps_ticks = ticks;
+    }
+    pthread_mutex_unlock(&frame_mutex);
 }
 
 void send_picture()
 {
-    int width = resolution.w, height = resolution.h;
-
 //    fprintf(stderr, "[Client] hyperion_set_image\n");
-    if (hyperion_set_image(rgb, stride, resolution.h) != 0)
-    {
-        fprintf(stderr, "Write timeout\n");
-        hyperion_destroy();
-        app_quit = true;
+    if (vtcapture_initialized || (_novideo == 1 && _nogui != 1)){
+        if (hyperion_set_image(rgb, stride, resolution.h) != 0)
+        {
+            fprintf(stderr, "Write timeout\n");
+            hyperion_destroy();
+            app_quit = true;
+        }
+    } else {
+        if (hyperion_set_image(rgb2, stride2, resolution.h) != 0)
+        {
+            fprintf(stderr, "Write timeout\n");
+            hyperion_destroy();
+            app_quit = true;
+        }
+         if (_novideo != 1 && vtfrmcnt > 200){
+            vtfrmcnt = 0;
+            fprintf(stderr, "Try to init vtcapture again..\n");
+            if (vtcapture_initialize() == 0){
+                fprintf(stderr, "Init possible. Cleanup and reset..\n");
+                restart = true;
+                app_quit = true;
+                vtcapture_initialized = false;
+            }
+        }
+        vtfrmcnt++;
     }
 }
 
