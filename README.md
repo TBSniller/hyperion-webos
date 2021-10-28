@@ -20,15 +20,15 @@ You should be good to go. **I think root will be also requierd, I never tested i
 
 Since LG started to do some more permission handling, the binary must be able to talk to the libvtcapture library. Take a look at the `setlibvtcapturepermission.sh` to get an idea of that, change the binary-path to your needs and run it, before starting the executeable. 
 
- Usage:
- > hyperion-webos -a ADDRESS [OPTION]...
- >  -x, --width      |     Width of video frame (default 360)
->  -y, --height     |     Height of video frame (default 180)
->  -a, --address    |     IP address of Hyperion server
->  -p, --port     |       Port of Hyperion flatbuffers server (default 19400)
->  -f, --fps      |       Framerate for sending video frames (default unlimited)
->  -V, --no-video   |     Video will not be captured
->  -G, --no-gui     |     GUI/UI will not be captured
+ Usage:  
+ > hyperion-webos -a ADDRESS [OPTION]...  
+ >  -x, --width      |     Width of video frame (default 360)  
+>  -y, --height     |     Height of video frame (default 180)  
+>  -a, --address    |     IP address of Hyperion server  
+>  -p, --port     |       Port of Hyperion flatbuffers server (default 19400)  
+>  -f, --fps      |       Framerate for sending video frames (default unlimited)  
+>  -V, --no-video   |     Video will not be captured  
+>  -G, --no-gui     |     GUI/UI will not be captured  
 
 
 ### How to build
