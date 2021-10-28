@@ -13,7 +13,7 @@ Take a look here, if you are just looking for an app that can simply be installe
 First you should check if your TV has the libraries. You can check it with  
 `find / | grep libvtcapture`
 If you get something like this
->/usr/lib/libvtcapture.so.1
+>/usr/lib/libvtcapture.so.1  
 >/usr/lib/libvtcapture.so.1.0.0  
 
 You should be good to go. **I think root will be also requierd, I never tested it without.**  
