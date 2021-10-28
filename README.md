@@ -21,7 +21,7 @@ You should be good to go. **I think root will be also requierd, I never tested i
 Since LG started to do some more permission handling, the binary must be able to talk to the libvtcapture library. Take a look at the `setlibvtcapturepermission.sh` to get an idea of that, change the binary-path to your needs and run it, before starting the executeable. 
 
  Usage:  
- > hyperion-webos -a ADDRESS [OPTION]...  
+ > hyperion-webos_libvtcapture -a ADDRESS [OPTION]...  
  >  -x, --width      |     Width of video frame (default 360)  
 >  -y, --height     |     Height of video frame (default 180)  
 >  -a, --address    |     IP address of Hyperion server  
@@ -40,3 +40,6 @@ Specifying the target is neccessary.
 
 ### Not working
 Limiting the FPS isn't supported at this time.
+
+### Questions? 
+Join the OpenLG-Discord: https://discord.gg/pfU6wXQnG9
