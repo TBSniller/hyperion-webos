@@ -118,6 +118,16 @@ static void handle_signal(int signal)
         capture_stop();
         exit(0);
         break;
+    case SIGTERM:
+        app_quit = true;
+        hyperion_destroy();
+        capture_stop();
+        exit(0);
+        break;
+    case SIGCONT:
+        app_quit = true;
+        restart = true;
+        break;
     default:
         break;
     }
@@ -243,6 +253,8 @@ int main(int argc, char *argv[])
         
         hyperion_client("hyperion-webos", _address, _port, 150);
         signal(SIGINT, handle_signal);
+        signal(SIGTERM, handle_signal);
+        signal(SIGCONT, handle_signal);
         printf("Start connection loop\n");
         while (!app_quit)
         {
@@ -250,8 +262,9 @@ int main(int argc, char *argv[])
             capture_frame();
             if (hyperion_read() < 0)
             {
-                fprintf(stderr, "Connection terminated.\n");
+                fprintf(stderr, "Connection terminated. Trying restart..\n");
                 app_quit = true;
+                restart = true;
             }
     //        printf("-- Loop end --\n");
         }
