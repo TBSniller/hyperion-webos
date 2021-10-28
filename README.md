@@ -35,7 +35,7 @@ Since LG started to do some more permission handling, the binary must be able to
 You have to install the NDK from here: https://github.com/webosbrew/meta-lg-webos-ndk/releases 
 And after that do the first steps: https://github.com/webosbrew/meta-lg-webos-ndk#development-instructions
 
-You should then be able to compile it like `cmake --build /home/USER/vscode/hyperion-webos_libvtcapture/build --config Debug --target hyperion-webos_libvtcapture -- -j 10`
+You should then be able to compile it like `cmake --build /home/USER/vscode/hyperion-webos_libvtcapture/build --config Debug --target hyperion-webos_libvtcapture -- -j 10`  
 Specifying the target is neccessary.
 
 ### Not working
