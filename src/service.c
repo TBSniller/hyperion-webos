@@ -502,16 +502,24 @@ int service_register(service_t* service, GMainLoop* loop)
 
     LSGmainAttach(handle, loop, &lserror);
 
-    if (!LSCall(handle, "luna://com.webos.service.tvpower/power/getPowerState", "{\"subscribe\":true}", power_callback, (void*)service, NULL, &lserror)) {
-        WARN("Power state monitoring call failed: %s", lserror.message);
+    if (!service->settings->no_powerstate) {
+        if (!LSCall(handle, "luna://com.webos.service.tvpower/power/getPowerState", "{\"subscribe\":true}",
+                    power_callback, (void *) service, NULL, &lserror)) {
+            WARN("Power state monitoring call failed: %s", lserror.message);
+        }
     }
 
-    if (!LSCall(handle, "luna://com.webos.service.videooutput/getStatus", "{\"subscribe\":true}", videooutput_callback, (void*)service, NULL, &lserror)) {
-        WARN("videooutput/getStatus call failed: %s", lserror.message);
-    }
+    if (!service->settings->no_hdr) {
+        if (!LSCall(handle, "luna://com.webos.service.videooutput/getStatus", "{\"subscribe\":true}",
+                    videooutput_callback, (void *) service, NULL, &lserror)) {
+            WARN("videooutput/getStatus call failed: %s", lserror.message);
+        }
 
-    if (!LSCall(handle, "luna://com.webos.settingsservice/getSystemSettings", "{\"category\":\"picture\",\"subscribe\":true}", picture_callback, (void*)service, NULL, &lserror)) {
-        WARN("settingsservice/getSystemSettings call failed: %s", lserror.message);
+        if (!LSCall(handle, "luna://com.webos.settingsservice/getSystemSettings",
+                    "{\"category\":\"picture\",\"subscribe\":true}", picture_callback,
+                    (void *) service, NULL,&lserror)) {
+            WARN("settingsservice/getSystemSettings call failed: %s", lserror.message);
+        }
     }
 
     if (registeredLegacy) {
